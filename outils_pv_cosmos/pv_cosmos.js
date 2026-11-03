@@ -19,7 +19,7 @@
 (async function () {
   'use strict';
 
-  var VERSION = '1.0';
+  var VERSION = '1.1';
   var TOP = window.top || window;
   var TD = TOP.document;
   var W = window;
@@ -126,10 +126,18 @@
     return { netbios: p[0] || '', sn: p[1] || '', modele: p.slice(2).join(' - ') };
   }
 
-  function siteFrom(loc) {
+  /* "FRANCE/SUD-OUEST/BEZIERS/BAT MONTIMARAN/ETG 00/BUR 014"
+     -> site BEZIERS, bâtiment MONTIMARAN, étage 00, bureau 014 */
+  function parseLoc(loc) {
     var p = String(loc || '').split('/').map(clean).filter(Boolean);
-    if (p.length >= 3) return p[2];
-    return p.length ? p[p.length - 1] : '';
+    var r = { site: p.length >= 3 ? p[2] : (p[p.length - 1] || ''), bat: '', etage: '', bureau: '' };
+    p.slice(3).forEach(function (x) {
+      var m;
+      if ((m = x.match(/^(?:BAT|BAT\.|B[AÂ]TIMENT)\s+(.+)$/i))) r.bat = r.bat || m[1];
+      else if ((m = x.match(/^(?:ETG|ETAGE|[ÉE]TAGE)\s*(.+)$/i))) r.etage = r.etage || m[1];
+      else if ((m = x.match(/^(?:BUR|BUREAU)\s*(.+)$/i))) r.bureau = r.bureau || m[1];
+    });
+    return r;
   }
 
   /* ---------- lectures distantes ---------- */
@@ -256,7 +264,13 @@
     var shortDesc = fld('short_description');
     var benef = fld('request_item.requested_for') || varByLabel(/^B[ée]n[ée]ficiaire/i);
     var benefId = sysid('request_item.requested_for');
+    var emplArrivee = varByLabel(/^Emplacement d.arriv/i);
     var emplacement = varByLabel(/^Emplacement/i);
+    // Arrivée externe : le bénéficiaire est un compte générique ("A CREER_...") ;
+    // la vraie personne est dans les variables Nom / Prénom (Détail de la demande)
+    var varNom = varByLabel(/^\*?\s*Nom\s*$/i);
+    var varPrenom = varByLabel(/^\*?\s*Pr[ée]nom\s*$/i);
+    var benefGenerique = /A\s*CREER|^\W*-\s/i.test(benef);
     var aRecuperer = varByLabel(/Mat[ée]riel.{0,4}(r[ée]cup[ée]rer|restituer|d[ée]sinstaller|reprendre)/i);
     var snSuppr = varByLabel(/Num[ée]ro de s[ée]rie.{0,4}supprimer/i);
     var texts = journals(D).concat([val('sc_task.description')]);
@@ -275,11 +289,12 @@
 
     /* ----- 3. utilisateur ----- */
     status.textContent = 'Lecture de la fiche utilisateur…';
-    var user = await getUser(benefId);
+    var user = benefGenerique ? {} : await getUser(benefId);
     var nomAff = clean(benef.replace(/\(.*?\)/g, ''));
-    var prenom = clean(user.first_name) || nomAff.split(' ')[0] || '';
-    var nom = clean(user.last_name) || nomAff.split(' ').slice(1).join(' ');
-    var loc = clean(user.location) || emplacement;
+    var prenom = varPrenom || clean(user.first_name) || (benefGenerique ? '' : nomAff.split(' ')[0] || '');
+    var nom = varNom || clean(user.last_name) || (benefGenerique ? '' : nomAff.split(' ').slice(1).join(' '));
+    var loc = emplArrivee || clean(user.location) || emplacement;
+    var L = parseLoc(loc);
 
     /* ----- 4. actifs affectés / réservés ----- */
     status.textContent = 'Recherche du matériel affecté à / réservé pour ' + benef + '…';
@@ -304,10 +319,10 @@
     /* ----- 5. pré-remplissage ----- */
     var F = {
       DEM: dem, SCTASK: number, NOM: nom.toUpperCase(), PRENOM: prenom.toUpperCase(),
-      SITE: siteFrom(loc),
-      BATIMENT: userField(user, /^(building|u_.*(batiment|building))$/i),
-      ETAGE: userField(user, /(floor|etage)/i),
-      BUREAU: userField(user, /(room|bureau|office_num)/i)
+      SITE: L.site,
+      BATIMENT: L.bat || userField(user, /^(building|u_.*(batiment|building))$/i),
+      ETAGE: L.etage || userField(user, /(floor|etage)/i),
+      BUREAU: L.bureau || userField(user, /(room|bureau|office_num)/i)
     };
 
     // iPhone à installer : note de travail "Modèle / S/N / IMEI" non vide
