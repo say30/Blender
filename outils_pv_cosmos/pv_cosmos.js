@@ -19,7 +19,7 @@
 (async function () {
   'use strict';
 
-  var VERSION = '1.3';
+  var VERSION = '1.4';
   var TOP = window.top || window;
   var TD = TOP.document;
   var W = window;
@@ -148,13 +148,37 @@
   }
 
   /* Combine plusieurs emplacements : chaque information vient du premier qui la donne */
+  /* Le premier emplacement est la référence ; un autre emplacement ne
+     complète bâtiment / étage / bureau que s'il est dans la même ville. */
   function bestLoc(list) {
-    var r = { site: '', bat: '', etage: '', bureau: '' };
-    list.forEach(function (l) {
+    list = list.filter(Boolean);
+    var r = parseLoc(list[0] || '');
+    list.slice(1).forEach(function (l) {
       var x = parseLoc(l);
+      if (r.site && x.site && norm(x.site) !== norm(r.site)) return;
       for (var k in r) if (!r[k] && x[k]) r[k] = x[k];
     });
     return r;
+  }
+
+  /* Tous les champs "emplacement" du ticket (variables qui pointent sur
+     cmn_location), dans l'ordre : arrivée, emplacement / localisation, autres */
+  function locationVars(doc) {
+    doc = doc || D;
+    var out = [];
+    doc.querySelectorAll('input[id^="sys_display.ni."]').forEach(function (e) {
+      var base = e.id.replace(/^sys_display\./, '');
+      var v = clean(e.value || e.getAttribute('value'));
+      if (!v || HEX32.test(v)) return;
+      var isLoc = clean(val(base + 'TABLE', doc)) === 'cmn_location' || /cmn_location/.test(e.getAttribute('onfocus') || '') || /^FRANCE\//i.test(v);
+      if (!isLoc) return;
+      var lb = doc.getElementById('label_' + base) || doc.querySelector('label[for="' + e.id + '"]') || doc.querySelector('label[for="' + base + '"]');
+      var lab = lb ? clean(lb.textContent) : '';
+      var prio = /arriv/i.test(lab) ? 0 : /emplacement|localisation|site|lieu/i.test(lab) ? 1 : 2;
+      out.push({ label: lab || 'Emplacement', value: v, prio: prio });
+    });
+    out.sort(function (a, b) { return a.prio - b.prio; });
+    return out;
   }
 
   /* ---------- lectures distantes ---------- */
@@ -295,8 +319,7 @@
     var shortDesc = fld('short_description');
     var benef = fld('request_item.requested_for') || varByLabel(/^B[ée]n[ée]ficiaire/i);
     var benefId = sysid('request_item.requested_for');
-    var emplArrivee = varByLabel(/^Emplacement d.arriv/i);
-    var emplacement = varByLabel(/^Emplacement/i);
+    var locs = locationVars(D);
     // Arrivée externe : le bénéficiaire est un compte générique ("A CREER_...") ;
     // la vraie personne est dans les variables Nom / Prénom (Détail de la demande)
     var varNom = varByLabel(/^\*?\s*Nom\s*$/i);
@@ -324,7 +347,14 @@
     var nomAff = clean(benef.replace(/\(.*?\)/g, ''));
     var prenom = varPrenom || clean(user.first_name) || (benefGenerique ? '' : nomAff.split(' ')[0] || '');
     var nom = varNom || clean(user.last_name) || (benefGenerique ? '' : nomAff.split(' ').slice(1).join(' '));
-    var L = bestLoc([emplArrivee, clean(user.location), emplacement]);
+    // l'emplacement indiqué dans le ticket passe avant celui de la fiche utilisateur
+    if (clean(user.location)) locs.push({ label: 'Fiche utilisateur', value: clean(user.location), prio: 3 });
+    var seenLoc = {};
+    locs = locs.filter(function (x) { var k = norm(x.value); if (seenLoc[k]) return false; seenLoc[k] = 1; return true; });
+    var L = bestLoc(locs.map(function (x) { return x.value; }));
+    // bâtiment / étage / bureau de la fiche utilisateur seulement si c'est la même ville
+    var sameSite = !clean(user.location) || !L.site || norm(parseLoc(clean(user.location)).site) === norm(L.site);
+    var uf = function (re) { return sameSite ? userField(user, re) : ''; };
 
     /* ----- 4. actifs affectés / réservés ----- */
     var ids = [];
@@ -360,9 +390,9 @@
     var F = {
       DEM: dem, SCTASK: number, NOM: nom.toUpperCase(), PRENOM: prenom.toUpperCase(),
       SITE: L.site,
-      BATIMENT: L.bat || userField(user, /^(building|u_.*(batiment|building))$/i),
-      ETAGE: L.etage || userField(user, /(floor|etage)/i),
-      BUREAU: L.bureau || userField(user, /(room|bureau|office_num)/i)
+      BATIMENT: L.bat || uf( /^(building|u_.*(batiment|building))$/i),
+      ETAGE: L.etage || uf( /(floor|etage)/i),
+      BUREAU: L.bureau || uf( /(room|bureau|office_num)/i)
     };
 
     // iPhone à installer : note de travail "Modèle / S/N / IMEI" non vide
@@ -433,6 +463,15 @@
       el('div', { style: 'color:#666;font-size:12px', text: article + (shortDesc ? ' — ' + shortDesc : '') })
     ]));
     panel.appendChild(el('div', { style: 'margin:6px 0' }, [el('b', { text: 'Type de PV : ' }), typeSel]));
+    var locSel = null;
+    if (locs.length) {
+      locSel = el('select', { style: 'font-size:12px;padding:2px;max-width:100%', onchange: function () {
+        var x = bestLoc([locs[+locSel.value].value].concat(locs.map(function (y) { return y.value; })));
+        inputs.SITE.value = x.site; inputs.BATIMENT.value = x.bat; inputs.ETAGE.value = x.etage; inputs.BUREAU.value = x.bureau;
+        highlight();
+      } }, locs.map(function (x, i) { return el('option', { value: String(i), text: x.label + ' : ' + x.value }); }));
+      panel.appendChild(el('div', { style: 'margin:6px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap' }, [el('b', { text: 'Localisation : ' }), locSel]));
+    }
 
     GROUPS.forEach(function (g) {
       var box = el('fieldset', { style: 'border:1px solid #ccd;border-radius:6px;margin:6px 0;padding:4px 8px' },
