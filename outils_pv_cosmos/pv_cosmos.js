@@ -19,7 +19,7 @@
 (async function () {
   'use strict';
 
-  var VERSION = '1.2';
+  var VERSION = '1.3';
   var TOP = window.top || window;
   var TD = TOP.document;
   var W = window;
@@ -127,15 +127,32 @@
   }
 
   /* "FRANCE/SUD-OUEST/BEZIERS/BAT MONTIMARAN/ETG 00/BUR 014"
-     -> site BEZIERS, bâtiment MONTIMARAN, étage 00, bureau 014 */
+     -> ville BEZIERS, bâtiment MONTIMARAN, étage 0, bureau 014
+     (FRANCE et la région sont ignorés) */
   function parseLoc(loc) {
     var p = String(loc || '').split('/').map(clean).filter(Boolean);
-    var r = { site: p.length >= 3 ? p[2] : (p[p.length - 1] || ''), bat: '', etage: '', bureau: '' };
+    var r = { site: p.length >= 3 ? p[2] : '', bat: '', etage: '', bureau: '' };
     p.slice(3).forEach(function (x) {
-      var m;
-      if ((m = x.match(/^(?:BAT|BAT\.|B[AÂ]TIMENT)\s+(.+)$/i))) r.bat = r.bat || m[1];
-      else if ((m = x.match(/^(?:ETG|ETAGE|[ÉE]TAGE)\s*(.+)$/i))) r.etage = r.etage || m[1];
-      else if ((m = x.match(/^(?:BUR|BUREAU)\s*(.+)$/i))) r.bureau = r.bureau || m[1];
+      x.split(/\s+-\s+|,\s*/).forEach(function (y) {
+        var m;
+        if ((m = y.match(/^B[AÂ]T(?:IMENT)?\.?\s*(.+)$/i))) r.bat = r.bat || clean(m[1]);
+        else if ((m = y.match(/^(?:ETG|[ÉE]TAGE|NIV(?:EAU)?)\.?\s*(.+)$/i))) r.etage = r.etage || clean(m[1]);
+        else if (/^(RDC|REZ.DE.CHAUSS[ÉE]E)$/i.test(y)) r.etage = r.etage || '0';
+        else if ((m = y.match(/^(?:BUR(?:EAU)?|PI[ÈE]CE|SALLE)\.?\s*(.+)$/i))) r.bureau = r.bureau || clean(m[1]);
+      });
+    });
+    // "ETG 00" -> 0 ; "ETG 02" -> 2 ; "RDC" -> 0
+    if (/^RDC$/i.test(r.etage)) r.etage = '0';
+    else if (/^-?\d+$/.test(r.etage)) r.etage = String(parseInt(r.etage, 10));
+    return r;
+  }
+
+  /* Combine plusieurs emplacements : chaque information vient du premier qui la donne */
+  function bestLoc(list) {
+    var r = { site: '', bat: '', etage: '', bureau: '' };
+    list.forEach(function (l) {
+      var x = parseLoc(l);
+      for (var k in r) if (!r[k] && x[k]) r[k] = x[k];
     });
     return r;
   }
@@ -307,8 +324,7 @@
     var nomAff = clean(benef.replace(/\(.*?\)/g, ''));
     var prenom = varPrenom || clean(user.first_name) || (benefGenerique ? '' : nomAff.split(' ')[0] || '');
     var nom = varNom || clean(user.last_name) || (benefGenerique ? '' : nomAff.split(' ').slice(1).join(' '));
-    var loc = emplArrivee || clean(user.location) || emplacement;
-    var L = parseLoc(loc);
+    var L = bestLoc([emplArrivee, clean(user.location), emplacement]);
 
     /* ----- 4. actifs affectés / réservés ----- */
     var ids = [];
