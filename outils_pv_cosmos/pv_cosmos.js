@@ -19,7 +19,7 @@
 (async function () {
   'use strict';
 
-  var VERSION = '1.1';
+  var VERSION = '1.2';
   var TOP = window.top || window;
   var TD = TOP.document;
   var W = window;
@@ -213,6 +213,20 @@
     try { return journals(await getDoc('/sc_task.do?sys_id=' + taskId)); } catch (e) { return []; }
   }
 
+  function norm(x) { return clean(x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
+
+  /* Compte COSMOS d'une personne à partir de son nom / prénom (arrivée externe) */
+  async function findUsers(nom, prenom) {
+    if (!nom) return [];
+    var rows = await query('sys_user', 'last_nameLIKE' + nom, 'sys_id,name,first_name,last_name,user_name');
+    if (!rows.length && norm(nom) !== nom.toLowerCase()) rows = await query('sys_user', 'last_nameLIKE' + norm(nom).toUpperCase(), 'sys_id,name,first_name,last_name,user_name');
+    var n = norm(nom), p = norm(prenom);
+    return rows.filter(function (r) {
+      var t = norm(Object.keys(r).map(function (k) { return r[k]; }).join(' '));
+      return r.sys_id && t.indexOf(n) >= 0 && (!p || t.indexOf(p) >= 0);
+    });
+  }
+
   function userField(u, re) {
     for (var k in u) {
       if (!re.test(k)) continue;
@@ -297,8 +311,18 @@
     var L = parseLoc(loc);
 
     /* ----- 4. actifs affectés / réservés ----- */
-    status.textContent = 'Recherche du matériel affecté à / réservé pour ' + benef + '…';
-    var rawAssets = benefId ? await query('alm_asset', 'assigned_to=' + benefId + '^ORreserved_for=' + benefId,
+    var ids = [];
+    var qui = benef;
+    if (benefGenerique || (varNom && !benefId)) {
+      status.textContent = 'Recherche du compte de ' + prenom + ' ' + nom + '…';
+      var found = await findUsers(nom, prenom);
+      ids = found.map(function (u) { return u.sys_id; });
+      if (found.length) qui = found.map(function (u) { return clean(u.name) || (clean(u.first_name) + ' ' + clean(u.last_name)); }).join(', ');
+      else warnings.push('Aucun compte COSMOS trouvé pour ' + prenom + ' ' + nom + ' : le matériel réservé ne peut pas être cherché.');
+    } else if (benefId) ids = [benefId];
+    benef = qui;
+    status.textContent = 'Recherche du matériel affecté à / réservé pour ' + qui + '…';
+    var rawAssets = ids.length ? await query('alm_asset', 'assigned_toIN' + ids.join(',') + '^ORreserved_forIN' + ids.join(','),
       'sys_id,asset_tag,serial_number,u_code,model_category,model.display_name,model,install_status,substatus,reserved_for,assigned_to') : [];
     var assets = rawAssets.map(function (a) {
       var o = {
