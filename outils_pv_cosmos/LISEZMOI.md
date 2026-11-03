@@ -21,12 +21,13 @@ Deux clics au lieu de recopier les champs à la main :
 2. Fais glisser le bouton **PV COSMOS** dans la barre des favoris (Ctrl+Maj+B pour l'afficher).
 
 ### Le module Excel
-1. Ouvre `PV_Vide.xlsm` et fais **Alt + F11** (éditeur VBA).
-2. Va dans **Fichier > Importer un fichier…** et choisis `ImportCosmos.bas`.
-3. Facultatif : en haut du module, mets ton nom dans `TECHNICIEN`, par exemple `"MARTINEZ Philippe"` (comme dans la liste « Technicien SPIE »).
-4. Ferme l'éditeur et **enregistre** le classeur (format .xlsm).
+Le PV est protégé (feuilles et projet VBA). On ne le modifie donc pas : le module va dans le **classeur de macros personnelles** (PERSONAL.XLSB) et agit sur le PV ouvert.
+1. Dans Excel, va dans Affichage > Macros > Enregistrer une macro…, choisis « Classeur de macros personnelles », clique sur OK, puis arrête l'enregistrement.
+2. Fais **Alt + F11**, sélectionne VBAProject (PERSONAL.XLSB), puis Fichier > Importer un fichier… > `ImportCosmos.bas`.
+3. Alt+F8 > PERSONAL.XLSB!Importer_Cosmos > Options, puis tape le raccourci `I` majuscule (Ctrl+Maj+I).
+4. Quand Excel le demande en fermant, enregistre le classeur de macros personnelles.
 
-Le raccourci **Ctrl+Maj+I** est créé automatiquement. S'il ne marche pas : Alt+F8, choisis `Importer_Cosmos`, puis Options et tape `I` majuscule.
+Les cellules remplies par la macro sont des cellules de saisie, non verrouillées : la protection des feuilles ne gêne pas. Si une cellule refuse l'écriture, la macro le signale.
 
 ## Ce qui est récupéré
 

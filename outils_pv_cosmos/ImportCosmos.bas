@@ -3,8 +3,10 @@ Attribute VB_Name = "ImportCosmos"
 '  Import des informations COSMOS dans le PV
 '  1. Sur le ticket COSMOS : clic sur le favori "PV COSMOS"
 '     puis bouton "Copier pour le PV"
-'  2. Dans ce classeur : Ctrl + Maj + I  (ou Alt+F8 > Importer_Cosmos)
+'  2. Dans le PV ouvert : Ctrl + Maj + I  (ou Alt+F8 > Importer_Cosmos)
 '  Les champs vides dans COSMOS ne sont pas modifiés dans le PV.
+'  Ce module peut être placé dans le classeur de macros personnelles
+'  (PERSONAL.XLSB) : il agit sur le PV actif, sans modifier le PV lui-même.
 ' =====================================================================
 Option Explicit
 
@@ -19,7 +21,7 @@ Public Sub Importer_Cosmos()
 Attribute Importer_Cosmos.VB_ProcData.VB_Invoke_Func = "I\n14"
     Dim txt As String, d As Object, typ As String
     Dim ws As Worksheet, nomFeuille As String, f As Variant
-    Dim rep As VbMsgBoxResult
+    Dim rep As VbMsgBoxResult, wb As Workbook
 
     txt = LirePressePapier()
     If InStr(1, txt, "#PVCOSMOS", vbBinaryCompare) = 0 Then
@@ -27,6 +29,13 @@ Attribute Importer_Cosmos.VB_ProcData.VB_Invoke_Func = "I\n14"
                "Sur la page du ticket COSMOS : clique sur le favori « PV COSMOS »," & vbCrLf & _
                "puis sur le bouton « Copier pour le PV », et relance l'import.", _
                vbExclamation, "Import COSMOS"
+        Exit Sub
+    End If
+
+    Set wb = ActiveWorkbook
+    If Not FeuilleExiste(wb, "IPHONE") Or Not FeuilleExiste(wb, "Inst_PC") Or Not FeuilleExiste(wb, "Data") Then
+        MsgBox "Ouvre d'abord le PV Excel (fichier avec les feuilles IPHONE, Inst_PC...)," & vbCrLf & _
+               "puis relance l'import.", vbExclamation, "Import COSMOS"
         Exit Sub
     End If
 
@@ -41,7 +50,7 @@ Attribute Importer_Cosmos.VB_ProcData.VB_Invoke_Func = "I\n14"
             MsgBox "Type de PV inconnu : " & typ, vbExclamation, "Import COSMOS"
             Exit Sub
     End Select
-    Set ws = ThisWorkbook.Sheets(nomFeuille)
+    Set ws = wb.Sheets(nomFeuille)
 
     ' Le PV contient déjà un autre dossier ?
     If Len(Trim$(CStr(ws.Range("Q4").Value))) > 0 And _
@@ -57,7 +66,7 @@ Attribute Importer_Cosmos.VB_ProcData.VB_Invoke_Func = "I\n14"
     ws.Visible = xlSheetVisible
     ws.Activate
     For Each f In Array("Menu", "IPHONE", "Inst_PC", "Rest_PC", "Rest_PC_IP")
-        If f <> nomFeuille Then ThisWorkbook.Sheets(f).Visible = xlSheetHidden
+        If f <> nomFeuille And FeuilleExiste(wb, CStr(f)) Then wb.Sheets(f).Visible = xlSheetHidden
     Next f
 
     mErreurs = ""
@@ -75,10 +84,10 @@ Attribute Importer_Cosmos.VB_ProcData.VB_Invoke_Func = "I\n14"
     Select Case typ
         Case "IPHONE"
             Ecrire ws, "E10", Lire(d, "IP_INST_SN")
-            Ecrire ws, "E11", ModeleListe(Lire(d, "IP_INST_MODELE"), "Tableau8", "A15:A33")
+            Ecrire ws, "E11", ModeleListe(wb, Lire(d, "IP_INST_MODELE"), "Tableau8", "A15:A33")
             Ecrire ws, "E12", Lire(d, "IP_INST_IMEI")
             Ecrire ws, "Q10", Lire(d, "IP_REST_SN")
-            Ecrire ws, "Q11", ModeleListe(Lire(d, "IP_REST_MODELE"), "Tableau8", "A15:A33")
+            Ecrire ws, "Q11", ModeleListe(wb, Lire(d, "IP_REST_MODELE"), "Tableau8", "A15:A33")
             Ecrire ws, "Q12", Lire(d, "IP_REST_IMEI")
             Ecrire ws, "I31", Lire(d, "NOM")
             Ecrire ws, "P31", Lire(d, "PRENOM")
@@ -95,7 +104,7 @@ Attribute Importer_Cosmos.VB_ProcData.VB_Invoke_Func = "I\n14"
             Ecrire ws, "P49", Lire(d, "PRENOM")
             EcrireSiVide ws, "H51", TECHNICIEN
             If typ = "REST_PC_IP" Then
-                Ecrire ws, "E23", ModeleListe(Lire(d, "IP_REST_MODELE"), "Liste_IPhone", "U3:U21")
+                Ecrire ws, "E23", ModeleListe(wb, Lire(d, "IP_REST_MODELE"), "Liste_IPhone", "U3:U21")
                 Ecrire ws, "Q23", Lire(d, "IP_REST_IMEI")
                 Ecrire ws, "E24", Lire(d, "IP_REST_SN")
             End If
@@ -103,13 +112,22 @@ Attribute Importer_Cosmos.VB_ProcData.VB_Invoke_Func = "I\n14"
 
     If Len(mErreurs) > 0 Then
         MsgBox mNb & " champ(s) rempli(s) depuis " & Lire(d, "SCTASK") & "." & vbCrLf & vbCrLf & _
-               "Cellules non modifiables :" & mErreurs, vbExclamation, "Import COSMOS"
+               "Cellules non modifiables (feuille protégée ?) :" & mErreurs & vbCrLf & vbCrLf & _
+               "Saisis-les à la main.", vbExclamation, "Import COSMOS"
     Else
         MsgBox mNb & " champ(s) rempli(s) depuis " & Lire(d, "SCTASK") & " (" & Lire(d, "DEM") & ")." & vbCrLf & vbCrLf & _
                "Reste à compléter : états, accessoires, tests, accompagnement," & vbCrLf & _
                "et bâtiment / étage / bureau s'ils sont vides.", vbInformation, "Import COSMOS"
     End If
 End Sub
+
+Private Function FeuilleExiste(wb As Workbook, ByVal nom As String) As Boolean
+    Dim sh As Object
+    On Error Resume Next
+    Set sh = wb.Sheets(nom)
+    On Error GoTo 0
+    FeuilleExiste = Not sh Is Nothing
+End Function
 
 ' --- Lecture du presse-papier (texte) ---
 Private Function LirePressePapier() As String
@@ -166,7 +184,7 @@ Private Sub EcrireSiVide(ws As Worksheet, ByVal adr As String, ByVal v As String
 End Sub
 
 ' --- Fait correspondre "APPLE iPhone 13 Pro" à la liste des modèles du PV ---
-Private Function ModeleListe(ByVal v As String, ByVal nomTable As String, ByVal plageSecours As String) As String
+Private Function ModeleListe(wb As Workbook, ByVal v As String, ByVal nomTable As String, ByVal plageSecours As String) As String
     Dim rng As Range, c As Range, nv As String, nc As String
     Dim best As String, bestLen As Long, court As String, nbCourt As Long
 
@@ -175,8 +193,8 @@ Private Function ModeleListe(ByVal v As String, ByVal nomTable As String, ByVal 
     If Len(v) = 0 Then Exit Function
 
     On Error Resume Next
-    Set rng = ThisWorkbook.Sheets("Data").ListObjects(nomTable).DataBodyRange
-    If rng Is Nothing Then Set rng = ThisWorkbook.Sheets("Data").Range(plageSecours)
+    Set rng = wb.Sheets("Data").ListObjects(nomTable).DataBodyRange
+    If rng Is Nothing Then Set rng = wb.Sheets("Data").Range(plageSecours)
     On Error GoTo 0
     If rng Is Nothing Then Exit Function
 
