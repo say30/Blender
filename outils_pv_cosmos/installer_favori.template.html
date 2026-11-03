@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Installer le favori PV COSMOS</title>
+<style>
+  :root { --bleu:#0b5394; --fond:#f5f7fa; --texte:#222; --carte:#fff; --gris:#666; }
+  body { margin:0; background:var(--fond); color:var(--texte); font:15px/1.5 Arial, sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:24px 16px; }
+  h1 { color:var(--bleu); margin:0 0 4px; font-size:24px; }
+  .carte { background:var(--carte); border-radius:10px; padding:16px 20px; margin:16px 0; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+  .favori { display:inline-block; padding:10px 22px; background:var(--bleu); color:#fff; font-weight:bold;
+            font-size:17px; border-radius:6px; text-decoration:none; cursor:grab; }
+  ol li { margin:6px 0; }
+  kbd { background:#eee; border:1px solid #ccc; border-radius:3px; padding:0 5px; font-size:13px; }
+  textarea { width:100%; height:90px; font-size:11px; box-sizing:border-box; }
+  .note { color:var(--gris); font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Favori « PV COSMOS »</h1>
+  <p class="note">Il lit les informations du ticket COSMOS ouvert et les prépare pour le PV Excel. Il ne modifie rien dans COSMOS.</p>
+
+  <div class="carte">
+    <h2>1. Installer le favori (une seule fois)</h2>
+    <ol>
+      <li>Affiche la barre des favoris : <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>B</kbd>.</li>
+      <li>Fais <b>glisser</b> ce bouton dans la barre des favoris :
+        <p><a class="favori" href="%%HREF%%" onclick="alert('Ne clique pas ici : fais glisser ce bouton dans la barre des favoris.');return false;">PV COSMOS</a></p>
+      </li>
+    </ol>
+    <details>
+      <summary>Si le glisser-déposer ne marche pas</summary>
+      <ol>
+        <li>Clic droit sur la barre des favoris, puis <b>Ajouter une page</b> (ou « Ajouter un favori »).</li>
+        <li>Nom : <b>PV COSMOS</b>.</li>
+        <li>URL : colle tout le texte ci-dessous (bouton « Copier »).</li>
+      </ol>
+      <textarea id="code" readonly>%%HREF%%</textarea>
+      <button onclick="var t=document.getElementById('code');t.select();document.execCommand('copy');this.textContent='Copié ✔';">Copier</button>
+    </details>
+  </div>
+
+  <div class="carte">
+    <h2>2. Utilisation</h2>
+    <ol>
+      <li>Ouvre le ticket <b>SCTASK</b> dans COSMOS.</li>
+      <li>Clique sur le favori <b>PV COSMOS</b>. Un panneau s'ouvre à droite avec les informations trouvées.</li>
+      <li>Vérifie le <b>type de PV</b> et les champs. Les cases jaunes sont vides : tu peux les compléter. Les boutons « → installé » et « → restitué » du tableau des actifs remplissent les champs à partir du matériel affecté à la personne.</li>
+      <li>Clique sur <b>Copier pour le PV</b>.</li>
+      <li>Dans le PV Excel : <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>I</kbd>.</li>
+    </ol>
+  </div>
+</main>
+</body>
+</html>
