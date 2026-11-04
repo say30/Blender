@@ -19,8 +19,9 @@
 (async function () {
   'use strict';
 
-  var VERSION = '1.6';
+  var VERSION = '1.7';
   var GCK = '';
+  var TBL = 'sc_task';
 
   /* Si le formulaire n'est pas accessible (nouveau cadre COSMOS, iframe dans un
      shadow DOM fermé...), on relit la page du ticket à partir du sys_id de l'adresse. */
@@ -28,9 +29,9 @@
     if (D.getElementById('sys_uniqueValue')) return 'page';
     var href = location.href;
     try { href = decodeURIComponent(decodeURIComponent(href)); } catch (e) { /* ignoré */ }
-    var m = href.match(/sc_task\.do\?(?:[^#]*?&)?sys_id=([0-9a-f]{32})/i) || href.match(/sys_id=([0-9a-f]{32})/i);
-    if (!m) return 'aucun sys_id dans l\'adresse';
-    var r = await fetch('/sc_task.do?sys_id=' + m[1], { credentials: 'same-origin' });
+    var m = href.match(/(sc_task|incident)\.do\?(?:[^#]*?&)?sys_id=([0-9a-f]{32})/i);
+    if (!m) return 'aucun ticket SCTASK ou INC dans l\'adresse';
+    var r = await fetch('/' + m[1].toLowerCase() + '.do?sys_id=' + m[2], { credentials: 'same-origin' });
     if (!r.ok) return 'lecture du ticket refusée (HTTP ' + r.status + ')';
     var txt = await r.text();
     var ck = txt.match(/g_ck\s*=\s*['"]([0-9a-f]{20,})['"]/i);
@@ -91,7 +92,7 @@
   }
 
   function fld(name, doc, table) {
-    table = table || 'sc_task';
+    table = table || TBL;
     var ids = ['sys_display.' + table + '.' + name, 'sys_readonly.' + table + '.' + name,
       table + '.' + name + '_label', table + '.' + name];
     for (var i = 0; i < ids.length; i++) {
@@ -102,7 +103,7 @@
   }
 
   function sysid(name, doc) {
-    var v = clean(val('sc_task.' + name, doc));
+    var v = clean(val(TBL + '.' + name, doc));
     return HEX32.test(v) ? v : '';
   }
 
@@ -347,20 +348,29 @@
   try {
     /* ----- 1. le ticket affiché ----- */
     var how = await resolveDoc();
+    TBL = /^incident$/i.test(clean(val('sys_target'))) ? 'incident' : 'sc_task';
+    var isInc = TBL === 'incident';
     var taskId = clean(val('sys_uniqueValue')) || sysid('sys_id');
     var number = fld('number') || clean(val('sys_displayValue'));
-    if (!/^SCTASK/i.test(number)) {
-      status.textContent = 'Ouvre la page d\'un ticket SCTASK (Tâche du catalogue), puis reclique sur le favori. ' +
+    if (!/^(SCTASK|INC)/i.test(number)) {
+      status.textContent = 'Ouvre la page d\'un ticket SCTASK ou d\'un incident INC, puis reclique sur le favori. ' +
         '[diagnostic : ' + how + ' ; cadres : ' + window.frames.length + ' ; ' + location.pathname.slice(0, 40) + ']';
       return;
     }
-    var dem = fld('request_item');
-    var ritm = sysid('request_item');
-    var article = fld('request_item.cat_item');
+    // Incident : pas de demande DEM, le n° de dossier est le n° INC ; bénéficiaire = caller_id
+    var dem = isInc ? number : fld('request_item');
+    var ritm = isInc ? '' : sysid('request_item');
+    var article = isInc ? [fld('category'), fld('subcategory')].filter(Boolean).join(' / ') : fld('request_item.cat_item');
     var shortDesc = fld('short_description');
-    var benef = fld('request_item.requested_for') || varByLabel(/^B[ée]n[ée]ficiaire/i);
-    var benefId = sysid('request_item.requested_for');
+    var benef = (isInc ? fld('caller_id') : fld('request_item.requested_for')) || varByLabel(/^B[ée]n[ée]ficiaire/i);
+    var benefId = isInc ? sysid('caller_id') : sysid('request_item.requested_for');
+    var descr = val(TBL + '.description');
     var locs = locationVars(D);
+    // "Localisation : FRANCE/..." écrite dans la description (incidents e-maintenance...)
+    var locDesc = grab(/Localisation\s*:\s*(FRANCE\/[^\n\r]+)/i, descr);
+    if (locDesc) locs.unshift({ label: 'Description', value: locDesc, prio: 0 });
+    var locInc = isInc ? fld('location') : '';
+    if (locInc) locs.push({ label: 'Emplacement du ticket', value: locInc, prio: 1 });
     // Arrivée externe : le bénéficiaire est un compte générique ("A CREER_...") ;
     // la vraie personne est dans les variables Nom / Prénom (Détail de la demande)
     var varNom = varByLabel(/^\*?\s*Nom\s*$/i);
@@ -368,9 +378,9 @@
     var benefGenerique = /A\s*CREER|^\W*-\s/i.test(benef);
     var aRecuperer = varByLabel(/Mat[ée]riel.{0,4}(r[ée]cup[ée]rer|restituer|d[ée]sinstaller|reprendre)/i);
     var snSuppr = varByLabel(/Num[ée]ro de s[ée]rie.{0,4}supprimer/i);
-    var texts = journals(D).concat([val('sc_task.description')]);
+    var texts = journals(D).concat([descr]);
 
-    var isPhone = /iphone|smartphone|t[ée]l[ée]phon/i.test(article);
+    var isPhone = /iphone|smartphone|t[ée]l[ée]phon/i.test(article + (isInc ? ' ' + shortDesc : ''));
     var type = isPhone ? 'IPHONE' : (/d[ée]sinstall|restitu|r[ée]cup[ée]r|retour/i.test(shortDesc) ? 'REST_PC' : 'INST_PC');
 
     /* ----- 2. autres tâches de la même demande (Approvisionnement matériel...) ----- */
