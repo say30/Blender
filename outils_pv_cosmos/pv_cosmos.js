@@ -19,7 +19,25 @@
 (async function () {
   'use strict';
 
-  var VERSION = '1.5';
+  var VERSION = '1.6';
+  var GCK = '';
+
+  /* Si le formulaire n'est pas accessible (nouveau cadre COSMOS, iframe dans un
+     shadow DOM fermé...), on relit la page du ticket à partir du sys_id de l'adresse. */
+  async function resolveDoc() {
+    if (D.getElementById('sys_uniqueValue')) return 'page';
+    var href = location.href;
+    try { href = decodeURIComponent(decodeURIComponent(href)); } catch (e) { /* ignoré */ }
+    var m = href.match(/sc_task\.do\?(?:[^#]*?&)?sys_id=([0-9a-f]{32})/i) || href.match(/sys_id=([0-9a-f]{32})/i);
+    if (!m) return 'aucun sys_id dans l\'adresse';
+    var r = await fetch('/sc_task.do?sys_id=' + m[1], { credentials: 'same-origin' });
+    if (!r.ok) return 'lecture du ticket refusée (HTTP ' + r.status + ')';
+    var txt = await r.text();
+    var ck = txt.match(/g_ck\s*=\s*['"]([0-9a-f]{20,})['"]/i);
+    if (ck) GCK = ck[1];
+    D = new DOMParser().parseFromString(txt, 'text/html');
+    return D.getElementById('sys_uniqueValue') ? 'relu' : 'page relue sans formulaire';
+  }
   /* Trouve la fenêtre du formulaire classique : directement, dans l'iframe
      gsft_main (UI16), ou dans l'iframe cachée dans le shadow DOM du nouveau
      cadre COSMOS (/now/nav/ui/classic/...). */
@@ -211,7 +229,7 @@
         (fields ? '&sysparm_fields=' + encodeURIComponent(fields) : '');
       var r = await fetch(u, {
         credentials: 'same-origin',
-        headers: { 'Accept': 'application/json', 'X-UserToken': W.g_ck || TOP.g_ck || '' }
+        headers: { 'Accept': 'application/json', 'X-UserToken': GCK || W.g_ck || TOP.g_ck || '' }
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       var j = await r.json();
@@ -328,10 +346,12 @@
 
   try {
     /* ----- 1. le ticket affiché ----- */
+    var how = await resolveDoc();
     var taskId = clean(val('sys_uniqueValue')) || sysid('sys_id');
     var number = fld('number') || clean(val('sys_displayValue'));
     if (!/^SCTASK/i.test(number)) {
-      status.textContent = 'Ouvre la page d\'un ticket SCTASK (Tâche du catalogue), puis reclique sur le favori.';
+      status.textContent = 'Ouvre la page d\'un ticket SCTASK (Tâche du catalogue), puis reclique sur le favori. ' +
+        '[diagnostic : ' + how + ' ; cadres : ' + window.frames.length + ' ; ' + location.pathname.slice(0, 40) + ']';
       return;
     }
     var dem = fld('request_item');
