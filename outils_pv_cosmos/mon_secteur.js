@@ -11,14 +11,34 @@
 (async function () {
   'use strict';
 
-  var VERSION = '1.0';
+  var VERSION = '1.1';
+  /* Trouve la fenêtre du formulaire classique : directement, dans l'iframe
+     gsft_main (UI16), ou dans l'iframe cachée dans le shadow DOM du nouveau
+     cadre COSMOS (/now/nav/ui/classic/...). */
+  function findFrame() {
+    function ok(w) { try { return !!(w && w.document && (w.document.getElementById('sys_uniqueValue') || w.g_form || w.g_ck)); } catch (e) { return false; } }
+    if (document.getElementById('sys_uniqueValue')) return window;
+    var f = document.getElementById('gsft_main');
+    if (f && ok(f.contentWindow)) return f.contentWindow;
+    var found = null;
+    (function walk(root, depth) {
+      if (found || !root || depth > 25) return;
+      var ifr = root.querySelectorAll ? root.querySelectorAll('iframe') : [];
+      for (var i = 0; i < ifr.length && !found; i++) if (ok(ifr[i].contentWindow)) found = ifr[i].contentWindow;
+      var all = root.querySelectorAll ? root.querySelectorAll('*') : [];
+      for (var j = 0; j < all.length && !found; j++) if (all[j].shadowRoot) walk(all[j].shadowRoot, depth + 1);
+    })(document, 0);
+    if (found) return found;
+    for (var k = 0; k < window.frames.length; k++) if (ok(window.frames[k])) return window.frames[k];
+    return window;
+  }
+
   var GROUP_QUERY = 'active=true^assignment_groupDYNAMICd6435e965f510100a9ad2572f2b47744';
   var STORE = 'monsecteur.v1';
   var TOP = window.top || window;
   var TD = TOP.document;
   var W = window;
-  var fr = document.getElementById('gsft_main');
-  if (fr && fr.contentWindow) W = fr.contentWindow;
+  W = findFrame();
   var HEX32 = /^[0-9a-f]{32}$/;
 
   var old = TD.getElementById('monsecteur-panel');
