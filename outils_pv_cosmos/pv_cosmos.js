@@ -19,7 +19,8 @@
 (async function () {
   'use strict';
 
-  var VERSION = '1.7';
+  var VERSION = '2.0';
+  var DONE_KEY = 'pvcosmos.faits';
   var GCK = '';
   var TBL = 'sc_task';
 
@@ -187,6 +188,20 @@
     return r;
   }
 
+  /* Date du dossier : la date de prochaine action (souvent le RDV) si elle est
+     à venir, sinon aujourd'hui. Format JJ/MM/AAAA. */
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function fmtDate(d) { return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear(); }
+  function dateDefaut(s) {
+    var now = new Date(), today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var m = String(s || '').match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) {
+      var d = new Date(+m[3], +m[2] - 1, +m[1]);
+      if (d >= today) return fmtDate(d);
+    }
+    return fmtDate(today);
+  }
+
   /* Combine plusieurs emplacements : chaque information vient du premier qui la donne */
   /* Le premier emplacement est la référence ; un autre emplacement ne
      complète bâtiment / étage / bureau que s'il est dans la même ville. */
@@ -317,6 +332,33 @@
     return '';
   }
 
+  /* ---------- tickets déjà traités (mémoire du navigateur) ---------- */
+
+  function loadDone() { try { return JSON.parse(TOP.localStorage.getItem(DONE_KEY)) || {}; } catch (e) { return {}; } }
+  function saveDone(o) { try { TOP.localStorage.setItem(DONE_KEY, JSON.stringify(o)); } catch (e) { /* ignoré */ } }
+
+  /* Sur une liste COSMOS : lignes des tickets déjà traités en vert + pastille */
+  function markList(doc) {
+    var done = loadDone(), n = 0;
+    doc.querySelectorAll('a').forEach(function (a) {
+      var t = clean(a.textContent);
+      if (!/^(SCTASK|INC)\d+$/i.test(t) || !done[t]) return;
+      var tr = a.closest('tr');
+      if (!tr || tr.getAttribute('data-pvc')) return;
+      tr.setAttribute('data-pvc', '1');
+      tr.querySelectorAll('td').forEach(function (td) { td.style.background = '#d9f2df'; });
+      var b = doc.createElement('span');
+      b.textContent = '✔ PV ' + (done[t].d || '');
+      b.title = 'PV créés le ' + (done[t].d || '') + ' : ' + (done[t].a || '');
+      b.style.cssText = 'background:#1a7f37;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;margin-left:6px;white-space:nowrap';
+      a.parentNode.insertBefore(b, a.nextSibling);
+      n++;
+    });
+    return n;
+  }
+
+  function hasList(doc) { return !!doc.querySelector('table.list_table, tr[sys_id], tr[record_class]'); }
+
   /* ---------- panneau ---------- */
 
   function el(tag, props, kids) {
@@ -352,6 +394,13 @@
     var isInc = TBL === 'incident';
     var taskId = clean(val('sys_uniqueValue')) || sysid('sys_id');
     var number = fld('number') || clean(val('sys_displayValue'));
+    if (!/^(SCTASK|INC)/i.test(number) && hasList(D)) {
+      var nbMarq = markList(D);
+      status.textContent = nbMarq ? nbMarq + ' ticket(s) déjà traités marqués en vert dans la liste.' :
+        'Aucun ticket de cette liste n\'a encore de PV créé avec le favori.';
+      setTimeout(function () { panel.remove(); }, 5000);
+      return;
+    }
     if (!/^(SCTASK|INC)/i.test(number)) {
       status.textContent = 'Ouvre la page d\'un ticket SCTASK ou d\'un incident INC, puis reclique sur le favori. ' +
         '[diagnostic : ' + how + ' ; cadres : ' + window.frames.length + ' ; ' + location.pathname.slice(0, 40) + ']';
@@ -365,6 +414,10 @@
     var benef = (isInc ? fld('caller_id') : fld('request_item.requested_for')) || varByLabel(/^B[ée]n[ée]ficiaire/i);
     var benefId = isInc ? sysid('caller_id') : sysid('request_item.requested_for');
     var descr = val(TBL + '.description');
+    var benefOrig = benef;
+    var nextAction = fld('u_next_action_datetime');
+    var operateur = varByLabel(/Op[ée]rateur/i);
+    var ligne = varByLabel(/Num[ée]ro de ligne/i) || varByLabel(/T[ée]l[ée]phone professionnel/i);
     var locs = locationVars(D);
     // "Localisation : FRANCE/..." écrite dans la description (incidents e-maintenance...)
     var locDesc = grab(/Localisation\s*:\s*(FRANCE\/[^\n\r]+)/i, descr);
@@ -420,13 +473,13 @@
     benef = qui;
     status.textContent = 'Recherche du matériel affecté à / réservé pour ' + qui + '…';
     var rawAssets = ids.length ? await query('alm_asset', 'assigned_toIN' + ids.join(',') + '^ORreserved_forIN' + ids.join(','),
-      'sys_id,asset_tag,serial_number,u_code,model_category,model.display_name,model,install_status,substatus,reserved_for,assigned_to') : [];
+      'sys_id,asset_tag,serial_number,u_code,model_category,model.display_name,model,install_status,substatus,reserved_for,assigned_to,location') : [];
     var assets = rawAssets.map(function (a) {
       var o = {
         tag: clean(a.asset_tag), sn: clean(a.serial_number), code: clean(a.u_code),
         cat: clean(a.model_category), model: clean(a['model.display_name'] || a.model || a.display_name),
         status: clean([a.install_status, a.substatus].map(clean).filter(Boolean).join(' / ')),
-        reserved: clean(a.reserved_for)
+        reserved: clean(a.reserved_for), loc: clean(a.location)
       };
       var s = (o.cat + ' ' + o.model).toLowerCase();
       o.kind = /smartphone|iphone|t[ée]l[ée]phone/.test(s) ? 'PHONE'
@@ -437,9 +490,22 @@
       return o;
     });
 
+    // Localisation de secours : emplacement du matériel EN SERVICE chez la personne
+    // (pas celui du matériel réservé, qui est l'emplacement du stock)
+    assets.forEach(function (a) {
+      if (a.reserved || !/^FRANCE\//i.test(a.loc) || !/utilisation|install/i.test(a.status)) return;
+      if (seenLoc[norm(a.loc)]) return;
+      seenLoc[norm(a.loc)] = 1;
+      locs.push({ label: 'Matériel en service (' + (a.cat || a.model) + ')', value: a.loc, prio: 4 });
+    });
+    L = bestLoc(locs.map(function (x) { return x.value; }));
+
     /* ----- 5. pré-remplissage ----- */
     var F = {
       DEM: dem, SCTASK: number, NOM: nom.toUpperCase(), PRENOM: prenom.toUpperCase(),
+      NNI: grab(/\(([A-Z0-9]+)\)\s*$/i, benefOrig) || clean(user.user_name),
+      LIGNE: clean(ligne).replace(/^\+33\s*/, '0'), OPERATEUR: operateur,
+      DATE: dateDefaut(nextAction),
       SITE: L.site,
       BATIMENT: L.bat || uf( /^(building|u_.*(batiment|building))$/i),
       ETAGE: L.etage || uf( /(floor|etage)/i),
@@ -489,31 +555,63 @@
       else { F.PCR_MODELE = F.PCR_MODELE || a.model; F.PCR_NETBIOS = F.PCR_NETBIOS || a.code; }
     });
 
-    /* ----- 6. affichage ----- */
+    /* ----- 6. opérations à faire (cochées par défaut) ----- */
+    var txtT = (article + ' ' + shortDesc).toLowerCase();
+    var act = {};
+    if (isPhone) {
+      act.IPHONE = 1;
+      if (F.IPI_SN || F.IPI_IMEI) act.CHARTE = 1;
+    } else {
+      if (F.PCI_SN || /install|appro|arriv|nouveau poste|mise en service/.test(txtT)) act.INST_PC = 1;
+      if (F.PCR_SN || /d[ée]sinstall|restitu|r[ée]cup[ée]r|d[ée]part|retour/.test(txtT)) act.REST_PC = 1;
+      if (act.REST_PC && (F.IPR_SN || F.IPR_IMEI)) { delete act.REST_PC; act.REST_PC_IP = 1; }
+      if (!act.INST_PC && !act.REST_PC && !act.REST_PC_IP) act.INST_PC = 1;
+    }
+    var ACTIONS = [['INST_PC', 'Installation PC'], ['REST_PC', 'Désinstallation PC'], ['IPHONE', 'iPhone (changement / installation / restitution)'],
+      ['REST_PC_IP', 'Désinstallation PC + iPhone'], ['CHARTE', 'Charte iPhone (+ PDF)']];
+
+    /* ----- 7. affichage ----- */
     var GROUPS = [
-      { title: 'Utilisateur', types: 'ALL', fields: [['DEM', 'N° dossier (DEM)'], ['NOM', 'Nom'], ['PRENOM', 'Prénom'], ['SITE', 'Site'], ['BATIMENT', 'Bâtiment'], ['ETAGE', 'Étage'], ['BUREAU', 'Bureau']] },
+      { title: 'Utilisateur et localisation', types: 'ALL', fields: [['DEM', 'N° dossier (DEM/INC)'], ['NOM', 'Nom'], ['PRENOM', 'Prénom'], ['SITE', 'Site (ville) *'], ['BATIMENT', 'Bâtiment *'], ['ETAGE', 'Étage *'], ['BUREAU', 'Bureau *'], ['DATE', 'Date du dossier']] },
       { title: 'PC installé', types: 'INST_PC', fields: [['PCI_MODELE', 'Modèle PC'], ['PCI_SN', 'N° série PC'], ['PCI_NETBIOS', 'NetBIOS'], ['PCI_STATION', 'N° série station'], ['PCI_ECRAN1', 'N° série écran 1'], ['PCI_ECRAN2', 'N° série écran 2']] },
       { title: 'PC restitué', types: 'REST_PC REST_PC_IP', fields: [['PCR_MODELE', 'Modèle PC'], ['PCR_SN', 'N° série PC'], ['PCR_NETBIOS', 'NetBIOS'], ['PCR_STATION', 'N° série station'], ['PCR_ECRAN1', 'N° série écran 1'], ['PCR_ECRAN2', 'N° série écran 2']] },
-      { title: 'iPhone installé', types: 'IPHONE', fields: [['IPI_MODELE', 'Modèle'], ['IPI_SN', 'N° série'], ['IPI_IMEI', 'IMEI']] },
-      { title: 'iPhone restitué', types: 'IPHONE REST_PC_IP', fields: [['IPR_MODELE', 'Modèle'], ['IPR_SN', 'N° série'], ['IPR_IMEI', 'IMEI']] }
+      { title: 'iPhone installé', types: 'IPHONE CHARTE', fields: [['IPI_MODELE', 'Modèle'], ['IPI_SN', 'N° série'], ['IPI_IMEI', 'IMEI']] },
+      { title: 'iPhone restitué', types: 'IPHONE REST_PC_IP', fields: [['IPR_MODELE', 'Modèle'], ['IPR_SN', 'N° série'], ['IPR_IMEI', 'IMEI']] },
+      { title: 'Charte iPhone', types: 'CHARTE', fields: [['NNI', 'NNI'], ['LIGNE', 'N° de ligne'], ['OPERATEUR', 'Opérateur']] }
     ];
+    var REQUIRED = ['SITE', 'BATIMENT', 'ETAGE', 'BUREAU'];
     var inputs = {};
     var groupEls = [];
-
-    var typeSel = el('select', { style: 'font-size:13px;padding:2px', onchange: refresh }, [
-      el('option', { value: 'IPHONE', text: 'Installation / Restitution iPhone' }),
-      el('option', { value: 'INST_PC', text: 'Installation PC' }),
-      el('option', { value: 'REST_PC', text: 'Restitution PC' }),
-      el('option', { value: 'REST_PC_IP', text: 'Restitution PC + iPhone' })
-    ]);
-    typeSel.value = type;
+    var checks = {};
 
     status.textContent = '';
     panel.appendChild(el('div', { style: 'margin-bottom:6px' }, [
       el('div', { text: number + ' · ' + dem + ' · ' + benef }),
       el('div', { style: 'color:#666;font-size:12px', text: article + (shortDesc ? ' — ' + shortDesc : '') })
     ]));
-    panel.appendChild(el('div', { style: 'margin:6px 0' }, [el('b', { text: 'Type de PV : ' }), typeSel]));
+
+    // déjà traité ?
+    var done = loadDone();
+    if (done[number]) {
+      var ban = el('div', { style: 'background:#d9f2df;border:1px solid #1a7f37;border-radius:5px;padding:5px 8px;margin:6px 0;color:#145c2a' }, [
+        el('b', { text: '✔ PV déjà créés le ' + done[number].d + ' ' }),
+        el('span', { text: '(' + (done[number].a || '') + '). Évite les doublons.' }),
+        el('button', { text: 'Marquer comme non fait', style: 'margin-left:6px;font-size:11px;cursor:pointer', onclick: function () {
+          var o = loadDone(); delete o[number]; saveDone(o); ban.remove();
+        } })
+      ]);
+      panel.appendChild(ban);
+    }
+
+    var actBox = el('div', { style: 'margin:6px 0;display:flex;flex-wrap:wrap;gap:4px 12px' }, [el('b', { style: 'width:100%', text: 'Documents à créer :' })]);
+    ACTIONS.forEach(function (a) {
+      var cb = el('input', { type: 'checkbox', onchange: refresh });
+      cb.checked = !!act[a[0]];
+      checks[a[0]] = cb;
+      actBox.appendChild(el('label', { style: 'display:flex;align-items:center;gap:4px;cursor:pointer' }, [cb, a[1]]));
+    });
+    panel.appendChild(actBox);
+
     var locSel = null;
     if (locs.length) {
       locSel = el('select', { style: 'font-size:12px;padding:2px;max-width:100%', onchange: function () {
@@ -522,6 +620,8 @@
         highlight();
       } }, locs.map(function (x, i) { return el('option', { value: String(i), text: x.label + ' : ' + x.value }); }));
       panel.appendChild(el('div', { style: 'margin:6px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap' }, [el('b', { text: 'Localisation : ' }), locSel]));
+    } else {
+      panel.appendChild(el('div', { style: 'margin:6px 0;color:#b00;font-weight:bold', text: '⚠ Aucune localisation trouvée dans COSMOS : remplis site, bâtiment, étage et bureau à la main.' }));
     }
 
     GROUPS.forEach(function (g) {
@@ -565,12 +665,14 @@
       warnings.push('Aucun actif trouvé affecté à / réservé pour ' + (benef || 'le bénéficiaire') + '.');
     }
 
-    var copyMsg = el('span', { style: 'margin-left:8px;font-weight:bold' });
+    var msg = el('div', { style: 'margin-top:6px;font-weight:bold' });
+    var forceBtn = el('button', { text: 'Créer quand même', style: 'display:none;margin-left:8px;font-size:12px;cursor:pointer', onclick: function () { doCreate(true); } });
     panel.appendChild(el('div', { style: 'margin-top:10px;display:flex;align-items:center;flex-wrap:wrap' }, [
-      el('button', { text: '📋 Copier pour le PV', style: 'font-size:14px;padding:6px 14px;background:#0b5394;color:#fff;border:0;border-radius:5px;cursor:pointer', onclick: doCopy }),
-      copyMsg
+      el('button', { text: '📄 Créer les PV', style: 'font-size:14px;padding:6px 14px;background:#0b5394;color:#fff;border:0;border-radius:5px;cursor:pointer', onclick: function () { doCreate(false); } }),
+      forceBtn
     ]));
-    panel.appendChild(el('div', { style: 'color:#666;font-size:12px;margin-top:4px', text: 'Puis dans le PV Excel : Ctrl + Maj + I (macro Importer_Cosmos).' }));
+    panel.appendChild(msg);
+    panel.appendChild(el('div', { style: 'color:#666;font-size:12px;margin-top:4px', text: 'Excel doit être ouvert : il crée les fichiers dans Documents\\COSMOS\\NOM Prénom\\date, puis ouvre le dossier.' }));
     if (warnings.length) {
       panel.appendChild(el('details', { style: 'margin-top:6px;color:#a15c00;font-size:11px' },
         [el('summary', { text: 'Remarques (' + warnings.length + ')' })].concat(warnings.map(function (w) { return el('div', { text: '• ' + w }); }))));
@@ -591,51 +693,58 @@
       highlight();
     }
 
+    function selected() { return ACTIONS.map(function (a) { return a[0]; }).filter(function (k) { return checks[k].checked; }); }
+
     function refresh() {
-      var t = typeSel.value;
-      groupEls.forEach(function (g) { g.style.display = (g.dataset.types === 'ALL' || g.dataset.types.split(' ').indexOf(t) >= 0) ? '' : 'none'; });
+      var sel = selected();
+      groupEls.forEach(function (g) {
+        var show = g.dataset.types === 'ALL' || g.dataset.types.split(' ').some(function (t) { return sel.indexOf(t) >= 0; });
+        g.style.display = show ? '' : 'none';
+      });
       highlight();
     }
 
     function highlight() {
-      for (var k in inputs) inputs[k].style.background = inputs[k].value.trim() ? '#fff' : '#fff6d6';
+      for (var k in inputs) {
+        var empty = !inputs[k].value.trim();
+        inputs[k].style.background = empty ? (REQUIRED.indexOf(k) >= 0 ? '#ffd9d9' : '#fff6d6') : '#fff';
+        inputs[k].style.borderColor = empty && REQUIRED.indexOf(k) >= 0 ? '#c0392b' : '#bbb';
+      }
     }
 
-    function payload() {
-      var t = typeSel.value;
+    function payload(sel) {
       var g = function (k) { return clean(inputs[k] ? inputs[k].value : ''); };
-      var side = t === 'INST_PC' ? 'PCI_' : 'PCR_';
-      var out = {
-        TYPE: t, DEM: g('DEM'), SCTASK: number, NOM: g('NOM'), PRENOM: g('PRENOM'),
-        SITE: g('SITE'), BATIMENT: g('BATIMENT'), ETAGE: g('ETAGE'), BUREAU: g('BUREAU')
-      };
-      if (t !== 'IPHONE') {
-        out.PC_MODELE = g(side + 'MODELE'); out.PC_SN = g(side + 'SN'); out.PC_NETBIOS = g(side + 'NETBIOS');
-        out.STATION_SN = g(side + 'STATION'); out.ECRAN1_SN = g(side + 'ECRAN1'); out.ECRAN2_SN = g(side + 'ECRAN2');
-      }
-      if (t === 'IPHONE') { out.IP_INST_MODELE = g('IPI_MODELE'); out.IP_INST_SN = g('IPI_SN'); out.IP_INST_IMEI = g('IPI_IMEI'); }
-      if (t === 'IPHONE' || t === 'REST_PC_IP') { out.IP_REST_MODELE = g('IPR_MODELE'); out.IP_REST_SN = g('IPR_SN'); out.IP_REST_IMEI = g('IPR_IMEI'); }
-      var lines = ['#PVCOSMOS1'];
-      for (var k in out) lines.push(k + '=' + out[k].replace(/[\r\n=]+/g, ' '));
+      var lines = ['#PVCOSMOS2', 'TICKET=' + number, 'ACTIONS=' + sel.join(',')];
+      for (var k in inputs) lines.push(k + '=' + g(k).replace(/[\r\n=]+/g, ' '));
       return lines.join('\r\n');
     }
 
-    function doCopy() {
-      var text = payload();
-      function ok() { copyMsg.style.color = '#1a7f37'; copyMsg.textContent = '✔ Copié ! Va dans Excel : Ctrl+Maj+I'; }
-      function fallback() {
-        var ta = el('textarea', { style: 'position:fixed;left:-9999px;top:0' });
-        ta.value = text; TD.body.appendChild(ta); ta.select();
-        var done = false;
-        try { done = TD.execCommand('copy'); } catch (e) { done = false; }
-        ta.remove();
-        if (done) return ok();
-        var box = el('textarea', { style: 'width:100%;height:120px;font-size:11px' });
-        box.value = text; panel.appendChild(box); box.select();
-        copyMsg.style.color = '#b00'; copyMsg.textContent = 'Copie bloquée : fais Ctrl+C dans le cadre ci-dessous.';
+    function doCreate(force) {
+      var sel = selected();
+      msg.style.color = '#b00';
+      if (!sel.length) { msg.textContent = 'Coche au moins un document à créer.'; return; }
+      if (!/^\d{2}\/\d{2}\/\d{4}$/.test(clean(inputs.DATE.value))) { msg.textContent = 'Date du dossier invalide : format JJ/MM/AAAA.'; return; }
+      if (!clean(inputs.NOM.value)) { msg.textContent = 'Le nom est vide : il sert à nommer le dossier.'; return; }
+      var missing = REQUIRED.filter(function (k) { return !clean(inputs[k].value); });
+      if (missing.length && !force) {
+        msg.textContent = '⚠ Localisation incomplète (' + missing.map(function (k) { return k.toLowerCase(); }).join(', ') +
+          ') : ces champs sont obligatoires dans le PV. Complète-les, ou clique « Créer quand même ».';
+        forceBtn.style.display = '';
+        highlight();
+        return;
       }
-      if (TOP.navigator.clipboard && TOP.isSecureContext) TOP.navigator.clipboard.writeText(text).then(ok, fallback);
-      else fallback();
+      var blob = new Blob([payload(sel)], { type: 'text/plain;charset=utf-8' });
+      var url = URL.createObjectURL(blob);
+      var a = TD.createElement('a');
+      a.href = url; a.download = 'PVCOSMOS_' + number + '.txt'; a.style.display = 'none';
+      TD.body.appendChild(a); a.click();
+      setTimeout(function () { a.remove(); URL.revokeObjectURL(url); }, 2000);
+      var o = loadDone();
+      o[number] = { d: fmtDate(new Date()), a: sel.map(function (k) { return ACTIONS.filter(function (x) { return x[0] === k; })[0][1]; }).join(', '), n: clean(inputs.NOM.value) + ' ' + clean(inputs.PRENOM.value) };
+      saveDone(o);
+      forceBtn.style.display = 'none';
+      msg.style.color = '#1a7f37';
+      msg.textContent = '✔ Demande envoyée à Excel (' + sel.length + ' document(s)). Le dossier s\'ouvre dans quelques secondes. Ticket marqué « PV fait ».';
     }
   } catch (e) {
     status.style.color = '#b00';
