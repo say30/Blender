@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "PV COSMOS - pastilles",
+  "version": "1.0",
+  "description": "Colore en vert dans COSMOS les tickets dont les PV ont été créés avec le favori PV COSMOS.",
+  "content_scripts": [
+    {
+      "matches": ["https://cosmos.rte-france.com/*"],
+      "js": ["pvcosmos.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -19,7 +19,7 @@
 (async function () {
   'use strict';
 
-  var VERSION = '2.0';
+  var VERSION = '2.1';
   var DONE_KEY = 'pvcosmos.faits';
   var GCK = '';
   var TBL = 'sc_task';
@@ -669,7 +669,8 @@
     var forceBtn = el('button', { text: 'Créer quand même', style: 'display:none;margin-left:8px;font-size:12px;cursor:pointer', onclick: function () { doCreate(true); } });
     panel.appendChild(el('div', { style: 'margin-top:10px;display:flex;align-items:center;flex-wrap:wrap' }, [
       el('button', { text: '📄 Créer les PV', style: 'font-size:14px;padding:6px 14px;background:#0b5394;color:#fff;border:0;border-radius:5px;cursor:pointer', onclick: function () { doCreate(false); } }),
-      forceBtn
+      forceBtn,
+      el('button', { text: '✔ Marquer comme fait (PV à la main)', title: 'Met la pastille verte sans créer de fichier', style: 'margin-left:8px;font-size:12px;padding:5px 10px;background:#fff;color:#1a7f37;border:1px solid #1a7f37;border-radius:5px;cursor:pointer', onclick: markManual })
     ]));
     panel.appendChild(msg);
     panel.appendChild(el('div', { style: 'color:#666;font-size:12px;margin-top:4px', text: 'Excel doit être ouvert : il crée les fichiers dans Documents\\COSMOS\\NOM Prénom\\date, puis ouvre le dossier.' }));
@@ -717,6 +718,14 @@
       var lines = ['#PVCOSMOS2', 'TICKET=' + number, 'ACTIONS=' + sel.join(',')];
       for (var k in inputs) lines.push(k + '=' + g(k).replace(/[\r\n=]+/g, ' '));
       return lines.join('\r\n');
+    }
+
+    function markManual() {
+      var o = loadDone();
+      o[number] = { d: fmtDate(new Date()), a: 'PV fait à la main', n: clean(inputs.NOM.value) + ' ' + clean(inputs.PRENOM.value) };
+      saveDone(o);
+      msg.style.color = '#1a7f37';
+      msg.textContent = '✔ Ticket marqué « PV fait » (sans création de fichier).';
     }
 
     function doCreate(force) {

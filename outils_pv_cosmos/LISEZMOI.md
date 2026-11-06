@@ -30,7 +30,8 @@
   - `NOM Prénom - Charte iPhone.xlsm` et `.pdf` ;
   
   puis supprime la demande et ouvre le dossier. Un fichier déjà présent n'est jamais écrasé (suffixe `(2)`). Journal : `Documents\COSMOS\journal_pv.csv`.
-- Doublons : le favori retient dans Edge les tickets traités. Sur le ticket, un bandeau vert s'affiche. Sur une liste COSMOS, un clic sur le favori colore en vert les tickets déjà faits.
+- Doublons : le favori retient dans Edge les tickets traités (« Créer les PV » ou « Marquer comme fait (PV à la main) »). Sur le ticket, un bandeau vert s'affiche. Sur une liste COSMOS, un clic sur le favori colore en vert les tickets déjà faits.
+- Extension Edge facultative (`extension_edge/`, à charger via edge://extensions > Mode développeur > Charger l'extension décompressée) : colore automatiquement en vert le n° et le bénéficiaire des tickets faits, et affiche un bandeau sur le ticket. Lecture seule.
 
 ## Sécurité
 
