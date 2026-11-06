@@ -98,16 +98,49 @@ Private Function DossierTelechargements() As String
 End Function
 
 Private Function DossierCosmos() As String
-    Dim p As String
+    Dim c As Variant, md As String
     If Len(DOSSIER_COSMOS) > 0 Then DossierCosmos = DOSSIER_COSMOS: Exit Function
-    p = Environ$("USERPROFILE") & "\Documents\COSMOS"
-    If Len(Dir(p & "\" & NOM_PV_VIDE)) = 0 Then
-        On Error Resume Next
-        p = CreateObject("WScript.Shell").SpecialFolders("MyDocuments") & "\COSMOS"
-        On Error GoTo 0
-    End If
-    DossierCosmos = p
+    On Error Resume Next
+    md = CreateObject("WScript.Shell").SpecialFolders("MyDocuments")
+    On Error GoTo 0
+    ' Documents classique, Documents redirigé, Documents dans OneDrive
+    For Each c In Array(Environ$("USERPROFILE") & "\Documents\COSMOS", md & "\COSMOS", _
+                        Environ$("OneDrive") & "\Documents\COSMOS", Environ$("OneDriveCommercial") & "\Documents\COSMOS")
+        If Len(Modele(CStr(c), "PV")) > 0 Then DossierCosmos = CStr(c): Exit Function
+    Next c
+    DossierCosmos = Environ$("USERPROFILE") & "\Documents\COSMOS"
 End Function
+
+' Trouve le modèle vide : nom exact, sinon "PV Vide.xlsm", "PV_Vide (1).xlsm"...
+Private Function Modele(ByVal base As String, ByVal quoi As String) As String
+    Dim f As String, motif As Variant
+    If Len(base) < 4 Then Exit Function
+    On Error Resume Next
+    If quoi = "PV" Then
+        If Len(Dir(base & "\" & NOM_PV_VIDE)) > 0 Then Modele = base & "\" & NOM_PV_VIDE: Exit Function
+        motif = "PV*Vide*.xls*"
+    Else
+        If Len(Dir(base & "\" & NOM_CHARTE_VIDE)) > 0 Then Modele = base & "\" & NOM_CHARTE_VIDE: Exit Function
+        motif = "Charte*Vide*.xls*"
+    End If
+    f = Dir(base & "\" & motif)
+    If Len(f) > 0 Then Modele = base & "\" & f
+End Function
+
+' Ferme le modèle s'il est déjà ouvert dans Excel (sinon Excel refuse de l'ouvrir une 2e fois)
+Private Sub FermerSiOuvert(ByVal chemin As String)
+    Dim w As Workbook, nom As String
+    nom = Mid$(chemin, InStrRev(chemin, "\") + 1)
+    For Each w In Application.Workbooks
+        If StrComp(w.Name, nom, vbTextCompare) = 0 Then
+            If w.Saved Then
+                w.Close SaveChanges:=False
+            Else
+                Err.Raise 1004, , "Le modèle " & nom & " est ouvert et modifié : ferme-le puis reclique sur « Créer les PV »."
+            End If
+        End If
+    Next w
+End Sub
 
 Private Sub CreerDossiers(ByVal chemin As String)
     Dim parties() As String, i As Long, cur As String
@@ -174,8 +207,8 @@ Private Sub TraiterFichier(ByVal fichier As String)
     Set d = Decoder(txt)
 
     base = DossierCosmos()
-    If Len(Dir(base & "\" & NOM_PV_VIDE)) = 0 Then
-        MsgBox "PV vide introuvable :" & vbCrLf & base & "\" & NOM_PV_VIDE & vbCrLf & vbCrLf & _
+    If Len(Modele(base, "PV")) = 0 Then
+        MsgBox "PV vide introuvable dans :" & vbCrLf & base & vbCrLf & vbCrLf & _
                "Place PV_Vide.xlsm (et Charte_Iphone_Vide.xlsm) dans ce dossier, puis reclique sur « Créer les PV » dans COSMOS.", _
                vbExclamation + vbSystemModal, "PV COSMOS"
         Exit Sub
@@ -242,7 +275,8 @@ Private Function CreerPV(d As Object, ByVal base As String, ByVal dossier As Str
     Dim wb As Workbook, ws As Worksheet, f As Variant, chemin As String
 
     On Error GoTo Echec
-    Set wb = Workbooks.Open(Filename:=base & "\" & NOM_PV_VIDE, UpdateLinks:=0, ReadOnly:=True, AddToMru:=False)
+    FermerSiOuvert Modele(base, "PV")
+    Set wb = Workbooks.Open(Filename:=Modele(base, "PV"), UpdateLinks:=0, ReadOnly:=True, AddToMru:=False)
     Set ws = wb.Sheets(feuille)
     ws.Visible = xlSheetVisible
     For Each f In Array("Menu", "IPHONE", "Inst_PC", "Rest_PC", "Rest_PC_IP")
@@ -313,13 +347,14 @@ Private Function CreerCharte(d As Object, ByVal base As String, ByVal dossier As
                              ByVal nomFichier As String, ByVal dateInterv As Date) As String
     Dim wb As Workbook, ws As Worksheet, chemin As String, pdf As String, ville As String
 
-    If Len(Dir(base & "\" & NOM_CHARTE_VIDE)) = 0 Then
-        mErreurs = mErreurs & vbCrLf & "  Charte vide introuvable : " & base & "\" & NOM_CHARTE_VIDE
+    If Len(Modele(base, "CHARTE")) = 0 Then
+        mErreurs = mErreurs & vbCrLf & "  Charte vide introuvable dans : " & base
         CreerCharte = "(charte non créée)"
         Exit Function
     End If
     On Error GoTo Echec
-    Set wb = Workbooks.Open(Filename:=base & "\" & NOM_CHARTE_VIDE, UpdateLinks:=0, ReadOnly:=True, AddToMru:=False)
+    FermerSiOuvert Modele(base, "CHARTE")
+    Set wb = Workbooks.Open(Filename:=Modele(base, "CHARTE"), UpdateLinks:=0, ReadOnly:=True, AddToMru:=False)
     Set ws = wb.Sheets("Saisie")
     Ecrire ws, "C2", Lire(d, "IPI_IMEI")
     Ecrire ws, "C5", Lire(d, "IPI_SN")
