@@ -19,7 +19,23 @@
 (async function () {
   'use strict';
 
-  var VERSION = '2.1';
+  var VERSION = '2.2';
+
+  /* Valeurs par défaut écrites par Excel dans les copies du PV et de la charte.
+     "SET"  = seulement si la case est vide ; "SETF" = remplace toujours.
+     Pour changer une valeur par défaut, il suffit de modifier cette liste
+     (pas besoin de toucher à la macro Excel). */
+  var NON_ACC = ['F17', 'F18', 'F19', 'F20', 'R15', 'R16', 'R17', 'R18', 'R19', 'R20'];
+  var DEFAUTS = {
+    INST_PC: NON_ACC.map(function (c) { return ['SET', 'Inst_PC', c, 'Non']; })
+      .concat(['F24', 'F25', 'F26', 'F27', 'F28', 'F29'].map(function (c) { return ['SET', 'Inst_PC', c, 'Oui']; }))
+      .concat([['SET', 'Inst_PC', 'G32', 'Oui']]),
+    REST_PC: NON_ACC.map(function (c) { return ['SET', 'Rest_PC', c, 'Non']; }),
+    REST_PC_IP: NON_ACC.concat(['E27', 'E28', 'Q27', 'Q28']).map(function (c) { return ['SET', 'Rest_PC_IP', c, 'Non']; }),
+    IPHONE: [],
+    // Charte : lieu, date et signature à la main
+    CHARTE: [['SETF', 'Prise en charge', 'B98', 'A :                                                              ,  le']]
+  };
   var DONE_KEY = 'pvcosmos.faits';
   var GCK = '';
   var TBL = 'sc_task';
@@ -717,6 +733,9 @@
       var g = function (k) { return clean(inputs[k] ? inputs[k].value : ''); };
       var lines = ['#PVCOSMOS2', 'TICKET=' + number, 'ACTIONS=' + sel.join(',')];
       for (var k in inputs) lines.push(k + '=' + g(k).replace(/[\r\n=]+/g, ' '));
+      sel.forEach(function (a) {
+        (DEFAUTS[a] || []).forEach(function (x) { lines.push(x[0] + '.' + x[1] + '.' + x[2] + '=' + x[3]); });
+      });
       return lines.join('\r\n');
     }
 

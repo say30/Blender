@@ -314,6 +314,8 @@ Private Function CreerPV(d As Object, ByVal base As String, ByVal dossier As Str
             Ecrire ws, "E24", Lire(d, "IPR_SN")
     End Select
 
+    AppliquerReglages wb, d, feuille
+
     wb.Activate
     ws.Activate
     chemin = CheminUnique(dossier, nomFichier, ".xlsm")
@@ -345,7 +347,7 @@ End Sub
 ' ---------------------------------------------------------------------
 Private Function CreerCharte(d As Object, ByVal base As String, ByVal dossier As String, _
                              ByVal nomFichier As String, ByVal dateInterv As Date) As String
-    Dim wb As Workbook, ws As Worksheet, chemin As String, pdf As String, ville As String
+    Dim wb As Workbook, ws As Worksheet, chemin As String, pdf As String
 
     If Len(Modele(base, "CHARTE")) = 0 Then
         mErreurs = mErreurs & vbCrLf & "  Charte vide introuvable dans : " & base
@@ -364,10 +366,9 @@ Private Function CreerCharte(d As Object, ByVal base As String, ByVal dossier As
     Ecrire ws, "C17", Prenom(Lire(d, "PRENOM"))
     Ecrire ws, "C20", Lire(d, "NNI")
     Ecrire ws, "C23", Lire(d, "LIGNE")
-    ville = Lire(d, "SITE")
-    If Len(ville) > 0 Then ville = StrConv(LCase$(ville), vbProperCase)
-    wb.Sheets("Prise en charge").Range("B98").Value = "A:         " & ville & _
-        "                                                 ,  le " & Format(dateInterv, "dd/mm/yyyy")
+    ' Lieu, date et signature : manuscrits (réglage envoyé par le favori)
+    AppliquerReglages wb, d, "Saisie"
+    AppliquerReglages wb, d, "Prise en charge"
     wb.Application.Calculate
 
     chemin = CheminUnique(dossier, nomFichier, ".xlsm")
@@ -384,6 +385,43 @@ Echec:
     On Error Resume Next
     If Not wb Is Nothing Then wb.Close SaveChanges:=False
 End Function
+
+' Réglages envoyés par le favori, une ligne par cellule :
+'   SET.<feuille>.<cellule>=valeur   -> écrit seulement si la cellule est vide
+'   SETF.<feuille>.<cellule>=valeur  -> écrit toujours (remplace)
+' Exemple : SET.Inst_PC.F17=Non   /   SETF.Prise en charge.B98=A : ... , le
+Private Sub AppliquerReglages(wb As Workbook, d As Object, ByVal feuille As String)
+    Dim k As Variant, cle As String, reste As String, p As Long, nomF As String, adr As String
+    Dim force As Boolean, v As String
+    For Each k In d.Keys
+        cle = CStr(k)
+        force = False
+        If UCase$(Left$(cle, 5)) = "SETF." Then
+            force = True: reste = Mid$(cle, 6)
+        ElseIf UCase$(Left$(cle, 4)) = "SET." Then
+            reste = Mid$(cle, 5)
+        Else
+            reste = ""
+        End If
+        If Len(reste) > 0 Then
+            p = InStrRev(reste, ".")
+            If p > 1 Then
+                nomF = Left$(reste, p - 1)
+                adr = Mid$(reste, p + 1)
+                If StrComp(nomF, feuille, vbTextCompare) = 0 Then
+                    v = CStr(d(k))
+                    On Error Resume Next
+                    If force Then
+                        wb.Sheets(feuille).Range(adr).Value = v
+                    ElseIf Len(Trim$(CStr(wb.Sheets(feuille).Range(adr).Value))) = 0 Then
+                        Ecrire wb.Sheets(feuille), adr, v
+                    End If
+                    On Error GoTo 0
+                End If
+            End If
+        End If
+    Next k
+End Sub
 
 Private Function Operateur(ByVal v As String) As String
     Dim u As String
